@@ -13,6 +13,7 @@ import Text.Show.Pretty (Value(..), valToStr)
 import qualified Data.Aeson           as Aeson
 import qualified Data.ByteString.Lazy as B.Lazy
 import qualified Data.Vector          as Vector
+import qualified Data.HashMap.Strict  as HashMap
 
 import Exception
 import GHC
@@ -20,6 +21,7 @@ import HscTypes
 import MonadUtils
 import OccName
 import Outputable (Outputable, showSDoc, ppr)
+import TcEvidence
 import Var
 
 #if MIN_VERSION_base(4,8,0)
@@ -33,7 +35,7 @@ import Data.Monoid (mconcat)
 
 pretty :: Outputable a => a -> Ghc String
 pretty x = do
-#if MIN_VERSION_ghc(7,6,0)
+#if MIN_VERSION_ghc(7,8,0)
   dynFlags <- getSessionDynFlags
   return $ showSDoc dynFlags (ppr x)
 #else
@@ -57,6 +59,7 @@ valueFromData x
   | Just x' <- cast x :: Maybe SrcSpan    = pretty' x'
   | Just x' <- cast x :: Maybe TyCon      = pretty' x'
   | Just x' <- cast x :: Maybe Var        = pretty' x'
+  | Just x' <- cast x :: Maybe TcEvBinds  = pretty' x'
   | otherwise = ghandle handleException $ do
       constrName <- liftIO $ evaluate $ showConstr constr
       Con constrName <$> sequence (gmapQ valueFromData x)
@@ -65,7 +68,7 @@ valueFromData x
     handleException e =
       case isKnownPanic (show e) of
         Just panic -> return $ String $ "<<" ++ panic ++ ">>"
-        Nothing    -> return $ String $ show (show e)
+        Nothing    -> return $ String $ show e
 
     isKnownPanic :: String -> Maybe String
     isKnownPanic e = msum $ map aux knownPanics
@@ -83,7 +86,7 @@ valueFromData x
       ]
 
     pretty' :: Outputable a => a -> Ghc Value
-    pretty' = liftM (String . show) . pretty
+    pretty' = liftM String . pretty
 
     constr :: Constr
     constr = toConstr x
@@ -194,6 +197,16 @@ dumpText = mapM_ go
 -------------------------------------------------------------------------------}
 
 instance ToJSON Value where
+  -- Special cases
+  toJSON (Con "False" []) = Aeson.Bool False
+  toJSON (Con "True"  []) = Aeson.Bool True
+  toJSON (Con "Bag.listToBag" [xs]) = toJSON xs
+  toJSON (Con "L" [loc, x]) =
+    case toJSON x of
+      Aeson.Object obj' -> Aeson.Object (HashMap.insert "location" (toJSON loc) obj')
+      nonObject         -> nonObject -- we lose the location information in this case
+
+  -- Rest
   toJSON (Con nm [])   = Aeson.String (fromString nm)
   toJSON (Con nm vals) = object [ fromString nm .= list vals ]
   toJSON (Tuple  vals) = list vals
