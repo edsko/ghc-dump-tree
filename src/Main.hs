@@ -3,16 +3,16 @@ module Main (main) where
 
 import Control.Exception
 import Control.Monad
+import Data.Aeson (ToJSON(..), object, (.=))
 import Data.Data (Data, Constr, cast, toConstr, showConstr, gmapQ)
 import Data.List (isInfixOf, isPrefixOf)
-import Text.Show.Pretty (Value(..), valToStr)
-import System.Environment (getArgs)
+import Data.String (fromString)
+import Options.Applicative
 import System.Process (readProcess)
-
-#if MIN_VERSION_base(4,8,0)
-#else
-import Control.Applicative
-#endif
+import Text.Show.Pretty (Value(..), valToStr)
+import qualified Data.Aeson           as Aeson
+import qualified Data.ByteString.Lazy as B.Lazy
+import qualified Data.Vector          as Vector
 
 import Exception
 import GHC
@@ -21,6 +21,15 @@ import MonadUtils
 import OccName
 import Outputable (Outputable, showSDoc, ppr)
 import Var
+
+#if MIN_VERSION_base(4,8,0)
+#else
+import Data.Monoid (mconcat)
+#endif
+
+{-------------------------------------------------------------------------------
+  Translate AST to Value
+-------------------------------------------------------------------------------}
 
 pretty :: Outputable a => a -> Ghc String
 pretty x = do
@@ -106,37 +115,37 @@ cleanupValue (Con nm vals)
 cleanupValue (String s) = String s
 cleanupValue _          = error "cleanupValue: unexpected Value"
 
-dumpModSummary :: ModSummary -> Ghc ()
-dumpModSummary modSummary = do
-   modName <- pretty (ms_mod_name modSummary)
-   section ("# " ++ modName) $ do
-     parsed      <- parseModule modSummary
-     typechecked <- typecheckModule parsed
+{-------------------------------------------------------------------------------
+  Extracting ASTs from a set of targets
+-------------------------------------------------------------------------------}
 
-     section "## Parsed" $
-       showTree $ pm_parsed_source parsed
+data Trees = Trees {
+    treesModule     :: String
+  , treeParsed      :: Value
+  , treeRenamed     :: Value
+  , treeTypechecked :: Value
+  }
 
-     section "## Renamed" $
-       case tm_renamed_source typechecked of
-         Just renamed -> showTree renamed
-         Nothing      -> liftIO $ putStrLn "<<NOT AVAILABLE>>"
+treesForModSummary :: ModSummary -> Ghc Trees
+treesForModSummary modSummary = do
+   parsed      <- parseModule modSummary
+   typechecked <- typecheckModule parsed
 
-     section "## Typechecked" $
-       showTree $ tm_typechecked_source typechecked
+   Trees <$> pretty (ms_mod_name modSummary)
+         <*> mkTree (pm_parsed_source parsed)
+         <*> (case tm_renamed_source typechecked of
+                Just renamed -> mkTree renamed
+                Nothing      -> return $ String $ show renamedTreeNotAvailable)
+         <*> mkTree (tm_typechecked_source typechecked)
   where
-    section :: String -> Ghc () -> Ghc ()
-    section title act = do
-      liftIO $ putStrLn title
-      act
-      liftIO $ putStrLn ""
+    mkTree :: Data a => a -> Ghc Value
+    mkTree = liftM cleanupValue . valueFromData
 
-    showTree :: Data a => a -> Ghc ()
-    showTree x = do
-      value <- valueFromData x
-      liftIO $ putStrLn $ valToStr (cleanupValue value)
+    renamedTreeNotAvailable :: String
+    renamedTreeNotAvailable = "<<NOT AVAILABLE>>"
 
-dumpTargets :: [FilePath] -> Ghc ()
-dumpTargets targets = do
+treesForTargets :: [FilePath] -> Ghc [Trees]
+treesForTargets targets = do
     -- Don't compile anything
     dynFlags <- getSessionDynFlags
     let dynFlags' = dynFlags {
@@ -151,7 +160,7 @@ dumpTargets targets = do
 
     -- Print each module
     hscEnv <- getSession
-    mapM_ dumpModSummary $ hsc_mod_graph hscEnv
+    mapM treesForModSummary $ hsc_mod_graph hscEnv
   where
     mkTarget :: FilePath -> Target
     mkTarget fp = Target {
@@ -160,8 +169,94 @@ dumpTargets targets = do
       , targetContents     = Nothing
       }
 
+{-------------------------------------------------------------------------------
+  Dump the trees to stdout in text format
+-------------------------------------------------------------------------------}
+
+dumpText :: [Trees] -> IO ()
+dumpText = mapM_ go
+  where
+    go :: Trees -> IO ()
+    go Trees{..} = do
+      section ("# " ++ treesModule) $ do
+        section "## Parsed"      $ showTree treeParsed
+        section "## Renamed"     $ showTree treeRenamed
+        section "## Typechecked" $ showTree treeTypechecked
+
+    section :: String -> IO () -> IO ()
+    section title = bracket_ (putStrLn title) (putStrLn "")
+
+    showTree :: Value -> IO ()
+    showTree = putStrLn . valToStr
+
+{-------------------------------------------------------------------------------
+  Dump in JSON format
+-------------------------------------------------------------------------------}
+
+instance ToJSON Value where
+  toJSON (Con nm [])   = Aeson.String (fromString nm)
+  toJSON (Con nm vals) = object [ fromString nm .= list vals ]
+  toJSON (Tuple  vals) = list vals
+  toJSON (List   vals) = list vals
+  toJSON (String s)    = Aeson.String (fromString s)
+  toJSON _             = error "toJSON: Unexpected Value"
+
+list :: ToJSON a => [a] -> Aeson.Value
+list = Aeson.Array . Vector.fromList . map toJSON
+
+instance ToJSON Trees where
+  toJSON Trees{..} = object [
+      "module"      .= treesModule
+    , "parsed"      .= treeParsed
+    , "renamed"     .= treeRenamed
+    , "typechecked" .= treeTypechecked
+    ]
+
+dumpJson :: [Trees] -> IO ()
+dumpJson = B.Lazy.putStr . Aeson.encode
+
+{-------------------------------------------------------------------------------
+  Main application
+-------------------------------------------------------------------------------}
+
 main :: IO ()
 main = do
-    libdir:_ <- lines <$> readProcess "ghc" ["--print-libdir"] ""
-    targets  <- getArgs
-    runGhc (Just libdir) (dumpTargets targets)
+    libdir:_    <- lines <$> readProcess "ghc" ["--print-libdir"] ""
+    Options{..} <- execParser opts
+    trees       <- runGhc (Just libdir) (treesForTargets optionsTargets)
+    if optionsDumpJson
+      then dumpJson trees
+      else dumpText trees
+  where
+    opts = info (helper <*> parseOptions) $ mconcat [
+        fullDesc
+      , header "ghc-dump-tree - Dump GHC's ASTs"
+      ]
+
+{-------------------------------------------------------------------------------
+  Command line arguments
+-------------------------------------------------------------------------------}
+
+data Options = Options {
+    optionsDumpJson :: Bool
+  , optionsTargets  :: [FilePath]
+  }
+
+parseOptions :: Parser Options
+parseOptions = Options
+  <$> (switch $ mconcat [
+          long "json"
+        , help "Output JSON"
+        ])
+  <*> some (argument str (metavar "TARGETS..."))
+
+{-------------------------------------------------------------------------------
+  Orphans
+-------------------------------------------------------------------------------}
+
+#if MIN_VERSION_ghc(7,8,0)
+#else
+instance Applicative Ghc where
+  pure  = return
+  (<*>) = ap
+#endif
