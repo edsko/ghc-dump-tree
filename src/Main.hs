@@ -17,6 +17,7 @@ import qualified Data.ByteString.Lazy as B.Lazy
 import qualified Data.Vector          as Vector
 import qualified Data.HashMap.Strict  as HashMap
 
+import Bag
 import Exception
 import GHC
 import HscTypes
@@ -251,17 +252,28 @@ data Trees = Trees {
 treesForModSummary :: ModSummary -> Ghc Trees
 treesForModSummary modSummary = do
    parsed      <- parseModule modSummary
-   typechecked <- typecheckModule parsed
+   let wrapErr se = return $ Left $ show $ bagToList $ srcErrorMessages se
+   eTypechecked <- handleSourceError wrapErr (Right <$> typecheckModule parsed)
 
    Trees <$> pretty (ms_mod_name modSummary)
          <*> mkTree (pm_parsed_source parsed)
-         <*> (case tm_renamed_source typechecked of
-                Just renamed -> mkTree renamed
-                Nothing      -> return $ String $ show renamedTreeNotAvailable)
-         <*> mkTree (tm_typechecked_source typechecked)
+         <*> mkRenamedTree    eTypechecked
+         <*> mkTypeCheckedTree eTypechecked
   where
     mkTree :: Data a => a -> Ghc Value
     mkTree = liftM cleanupValue . valueFromData
+
+    mkRenamedTree (Right typechecked) =
+      case tm_renamed_source typechecked of
+         Just renamed -> mkTree renamed
+         Nothing      -> return $ String $ show renamedTreeNotAvailable
+    mkRenamedTree (Left errors) = return (String errors)
+
+    mkTypeCheckedTree (Right typechecked) =
+      case tm_renamed_source typechecked of
+         Just renamed -> mkTree renamed
+         Nothing      -> return $ String $ show renamedTreeNotAvailable
+    mkTypeCheckedTree (Left errors) = return (String errors)
 
     renamedTreeNotAvailable :: String
     renamedTreeNotAvailable = "<<NOT AVAILABLE>>"
