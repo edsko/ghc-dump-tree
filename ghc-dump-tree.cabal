@@ -18,7 +18,7 @@ executable ghc-dump-tree
   build-depends:       base                 >=4.5  && <4.9,
                        aeson                >=0.7  && <0.9,
                        bytestring           >=0.9  && <0.11,
-                       ghc                  >=7.4  && <7.11,
+                       ghc                  >=7.4  && <7.12,
                        optparse-applicative >=0.11 && <0.12,
                        pretty-show          >=1.6  && <1.7,
                        process              >=1.1  && <1.3,
