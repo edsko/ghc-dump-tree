@@ -200,7 +200,7 @@ prettyName nm = do
           return $! Rec "" [("WiredIn", mod)]
       | isExternalName nm = do
           mod <- prettyModule (nameModule nm)
-          return $! Rec "" [("WiredIn", mod)]
+          return $! Rec "" [("External", mod)]
       | isInternalName nm = do
           return $! String "Internal"
       | isSystemName nm = do
