@@ -1,0 +1,18 @@
+# Stack config for ghc-dump-tree, for ease of building for multiple GHC versions.
+# 1) Install stack.
+# 2) Change the resolver option below to the GHC you like.
+# 3) stack build
+# 4) stack exec <the binary path you got in previous step>/ghc-dump-tree Some.hs
+#
+#    stack exec is needed so that the correct GHC libs are taken up from env.
+#    See also 'stack exec env'.
+#
+# For more information, see: https://github.com/commercialhaskell/stack/blob/release/doc/yaml_configuration.md
+
+# Specifies the GHC version and set of packages available (e.g., lts-3.5, nightly-2015-09-21, ghc-7.10.2)
+resolver: lts-3.12  # For GHC 7.10.2
+# resolver: lts-2.22  # For GHC 7.8.4
+
+# Local packages, usually specified by relative directory name
+packages:
+- '.'
