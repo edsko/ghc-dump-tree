@@ -77,7 +77,6 @@ valueFromData = go False
       | Just x' <- cast x :: Maybe Type          = withPretty b x'
       -- Abstract types we cannot traverse
       | Just x' <- cast x :: Maybe SrcSpan    = pretty' x'
-      | Just x' <- cast x :: Maybe TcEvBinds  = pretty' x'
       | Just x' <- cast x :: Maybe TyCon      = pretty' x'
       -- We cannot traverse names either, but we don't want to just call
       -- the pretty-printer because we would lose too much information
@@ -86,6 +85,7 @@ valueFromData = go False
       | Just x' <- cast x :: Maybe Name       = prettyName       x'
       | Just x' <- cast x :: Maybe OccName    = prettyOccName    x'
       | Just x' <- cast x :: Maybe RdrName    = prettyRdrName    x'
+      | Just x' <- cast x :: Maybe TcEvBinds  = prettyTcEvBinds  x'
       | Just x' <- cast x :: Maybe Var        = prettyVar        x'
       -- Otherwise just construct a generic value
       | otherwise = generic False x
@@ -172,6 +172,18 @@ prettyOccName nm
   where
     mk :: String -> Ghc Value
     mk namespace = return $! Rec "" [(namespace, String (occNameString nm))]
+
+prettyTcEvBinds :: TcEvBinds -> Ghc Value
+prettyTcEvBinds (TcEvBinds mut) = pretty' mut
+prettyTcEvBinds (EvBinds bagOfEvBind) = do
+    let evBinds = bagToList bagOfEvBind
+    fmap (Con "TcEvBinds") $! mapM prettyEvBind evBinds
+
+prettyEvBind :: EvBind -> Ghc Value
+prettyEvBind (EvBind var term) = do
+    pVar <- prettyVar var
+    pTerm <- pretty' term
+    return $! Rec "" [("ev_var", pVar), ("ev_term", pTerm)]
 
 prettyRdrName :: RdrName -> Ghc Value
 prettyRdrName (Unqual   nm) = prettyOccName nm
