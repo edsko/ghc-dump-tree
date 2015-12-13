@@ -41,11 +41,11 @@ import Data.Monoid (mconcat)
 
 pretty :: Outputable a => a -> Ghc String
 pretty x = do
-#if MIN_VERSION_ghc(7,8,0)
+#if MIN_VERSION_ghc(7,6,3)
   dynFlags <- getSessionDynFlags
-  return $ showSDoc dynFlags (ppr x)
+  return $! showSDoc dynFlags (ppr x)
 #else
-  return $ showSDoc (ppr x)
+  return $! showSDoc (ppr x)
 #endif
 
 pretty' :: Outputable a => a -> Ghc Value
@@ -77,7 +77,6 @@ valueFromData = go False
       | Just x' <- cast x :: Maybe Type          = withPretty b x'
       -- Abstract types we cannot traverse
       | Just x' <- cast x :: Maybe SrcSpan    = pretty' x'
-      | Just x' <- cast x :: Maybe TcEvBinds  = pretty' x'
       | Just x' <- cast x :: Maybe TyCon      = pretty' x'
       -- We cannot traverse names either, but we don't want to just call
       -- the pretty-printer because we would lose too much information
@@ -86,6 +85,7 @@ valueFromData = go False
       | Just x' <- cast x :: Maybe Name       = prettyName       x'
       | Just x' <- cast x :: Maybe OccName    = prettyOccName    x'
       | Just x' <- cast x :: Maybe RdrName    = prettyRdrName    x'
+      | Just x' <- cast x :: Maybe TcEvBinds  = prettyTcEvBinds  x'
       | Just x' <- cast x :: Maybe Var        = prettyVar        x'
       -- Otherwise just construct a generic value
       | otherwise = generic False x
@@ -100,13 +100,13 @@ valueFromData = go False
     withPretty False x = do
         prettied <- pretty x
         tree     <- generic True x
-        return $ Rec "" [(prettied, tree)]
+        return $! Rec "" [(prettied, tree)]
 
     handleException :: SomeException -> Ghc Value
     handleException e =
       case isKnownPanic (show e) of
-        Just panic -> return $ String $ "<<" ++ panic ++ ">>"
-        Nothing    -> return $ String $ show e
+        Just panic -> return $! String $ "<<" ++ panic ++ ">>"
+        Nothing    -> return $! String $ show e
 
     isKnownPanic :: String -> Maybe String
     isKnownPanic e = msum $ map aux knownPanics
@@ -171,7 +171,19 @@ prettyOccName nm
   | otherwise                        = error "unexpected OccName"
   where
     mk :: String -> Ghc Value
-    mk namespace = return $ Rec "" [(namespace, String (occNameString nm))]
+    mk namespace = return $! Rec "" [(namespace, String (occNameString nm))]
+
+prettyTcEvBinds :: TcEvBinds -> Ghc Value
+prettyTcEvBinds (TcEvBinds mut) = pretty' mut
+prettyTcEvBinds (EvBinds bagOfEvBind) = do
+    let evBinds = bagToList bagOfEvBind
+    fmap (Con "TcEvBinds") $! mapM prettyEvBind evBinds
+
+prettyEvBind :: EvBind -> Ghc Value
+prettyEvBind (EvBind var term) = do
+    pVar <- prettyVar var
+    pTerm <- pretty' term
+    return $! Rec "" [("ev_var", pVar), ("ev_term", pTerm)]
 
 prettyRdrName :: RdrName -> Ghc Value
 prettyRdrName (Unqual   nm) = prettyOccName nm
@@ -179,32 +191,32 @@ prettyRdrName (Exact    nm) = prettyName nm
 prettyRdrName (Qual mod nm) = do
     Rec "" fields <- prettyOccName nm
     qual <- prettyModuleName mod
-    return $ Rec "" (("Qual", qual):fields)
+    return $! Rec "" (("Qual", qual):fields)
 prettyRdrName (Orig mod nm) = do
     Rec "" fields <- prettyOccName nm
     orig <- prettyModule mod
-    return $ Rec "" (("Orig", orig):fields)
+    return $! Rec "" (("Orig", orig):fields)
 
 prettyName :: Name -> Ghc Value
 prettyName nm = do
     Rec "" fields <- prettyOccName (nameOccName nm)
     loc  <- pretty' (nameSrcSpan nm)
     sort <- prettyNameSort
-    return $ Rec "" (("n_loc",loc):("n_sort",sort):fields)
+    return $! Rec "" (("n_loc",loc):("n_sort",sort):fields)
   where
     prettyNameSort :: Ghc Value
     prettyNameSort
       | Just _tyThing <- wiredInNameTyThing_maybe nm = do
           mod <- prettyModule (nameModule nm)
           -- TODO: Do somethng with tyThing
-          return $ Rec "" [("WiredIn", mod)]
+          return $! Rec "" [("WiredIn", mod)]
       | isExternalName nm = do
           mod <- prettyModule (nameModule nm)
-          return $ Rec "" [("WiredIn", mod)]
+          return $! Rec "" [("External", mod)]
       | isInternalName nm = do
-          return $ String "Internal"
+          return $! String "Internal"
       | isSystemName nm = do
-          return $ String "System"
+          return $! String "System"
       | otherwise =
           error "Unexpected NameSort"
 
@@ -213,7 +225,7 @@ prettyVar nm = do
     Rec "" fields <- prettyName $ Var.varName nm
     typ <- valueFromData $ varType nm
     -- TODO: There is more information we could extract about Vars
-    return $ Rec "" (("varType", typ):fields)
+    return $! Rec "" (("varType", typ):fields)
 
 prettyModuleName :: ModuleName -> Ghc Value
 prettyModuleName = return . String . moduleNameString
@@ -223,7 +235,7 @@ prettyModule :: Module -> Ghc Value
 prettyModule mod = do
     pkg <- prettyPackageKey $ modulePackageKey mod
     nm  <- prettyModuleName $ moduleName       mod
-    return $ Con "Module" [pkg, nm]
+    return $! Con "Module" [pkg, nm]
 
 prettyPackageKey :: PackageKey -> Ghc Value
 prettyPackageKey = return . String . packageKeyString
@@ -232,7 +244,7 @@ prettyModule :: Module -> Ghc Value
 prettyModule mod = do
     pkg <- prettyPackageId  $ modulePackageId mod
     nm  <- prettyModuleName $ moduleName      mod
-    return $ Con "Module" [pkg, nm]
+    return $! Con "Module" [pkg, nm]
 
 prettyPackageId :: PackageId -> Ghc Value
 prettyPackageId = return . String . packageIdString
@@ -247,6 +259,7 @@ data Trees = Trees {
   , treeParsed      :: Value
   , treeRenamed     :: Value
   , treeTypechecked :: Value
+  , treeExports     :: Value
   }
 
 treesForModSummary :: ModSummary -> Ghc Trees
@@ -259,6 +272,7 @@ treesForModSummary modSummary = do
          <*> mkTree (pm_parsed_source parsed)
          <*> mkRenamedTree    eTypechecked
          <*> mkTypeCheckedTree eTypechecked
+         <*> mkExportTree eTypechecked
   where
     mkTree :: Data a => a -> Ghc Value
     mkTree = liftM cleanupValue . valueFromData
@@ -266,17 +280,19 @@ treesForModSummary modSummary = do
     mkRenamedTree (Right typechecked) =
       case tm_renamed_source typechecked of
          Just renamed -> mkTree renamed
-         Nothing      -> return $ String $ show renamedTreeNotAvailable
+         Nothing      -> return $ String $ show treeNotAvailable
     mkRenamedTree (Left errors) = return (String errors)
 
     mkTypeCheckedTree (Right typechecked) =
-      case tm_renamed_source typechecked of
-         Just renamed -> mkTree renamed
-         Nothing      -> return $ String $ show renamedTreeNotAvailable
+      mkTree $ tm_typechecked_source typechecked
     mkTypeCheckedTree (Left errors) = return (String errors)
 
-    renamedTreeNotAvailable :: String
-    renamedTreeNotAvailable = "<<NOT AVAILABLE>>"
+    mkExportTree (Right typechecked) =
+      mkTree $ modInfoExports $ tm_checked_module_info typechecked
+    mkExportTree (Left _) = return $ String $ show treeNotAvailable
+
+    treeNotAvailable :: String
+    treeNotAvailable = "<<NOT AVAILABLE>>"
 
 treesForTargets :: [FilePath] -> Ghc [Trees]
 treesForTargets targets = do
@@ -316,6 +332,7 @@ dumpText = mapM_ go
         section "## Parsed"      $ showTree treeParsed
         section "## Renamed"     $ showTree treeRenamed
         section "## Typechecked" $ showTree treeTypechecked
+        section "## Exports"     $ showTree treeExports
 
     section :: String -> IO () -> IO ()
     section title = bracket_ (putStrLn title) (putStrLn "")
@@ -355,6 +372,7 @@ instance ToJSON Trees where
     , "parsed"      .= treeParsed
     , "renamed"     .= treeRenamed
     , "typechecked" .= treeTypechecked
+    , "exports"     .= treeExports
     ]
 
 dumpJson :: [Trees] -> IO ()
