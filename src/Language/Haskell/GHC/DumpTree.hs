@@ -43,7 +43,7 @@ import qualified OccName as Occ
   Translate AST to Value
 -------------------------------------------------------------------------------}
 
-pretty :: Outputable a => a -> Ghc String
+pretty :: (Outputable a, GhcMonad m) => a -> m String
 pretty x = do
 #if MIN_VERSION_ghc(7,6,3)
   dynFlags <- getSessionDynFlags
@@ -52,7 +52,7 @@ pretty x = do
   return $! showSDoc (ppr x)
 #endif
 
-pretty' :: Outputable a => a -> Ghc Value
+pretty' :: (Outputable a, GhcMonad m) => a -> m Value
 pretty' = liftM String . pretty
 
 -- | Construct a `Value` from any term implementing `data`
@@ -68,12 +68,12 @@ pretty' = liftM String . pretty
 -- Moreover, for a few types we show both the pretty-printed form and the
 -- actual tree; we are careful to do this only for top-level occurrences of
 -- these types.
-valueFromData :: Data a => a -> Ghc Value
+valueFromData :: (Data a, GhcMonad m) => a -> m Value
 valueFromData = go False
   where
     -- Bool indicates if we just added a pretty-printed form as well
     -- (so that we don't do it for directly recursive values)
-    go :: Data a => Bool -> a -> Ghc Value
+    go :: (Data a, GhcMonad m) => Bool -> a -> m Value
     go b x
       -- Types where we want to show both a pretty-printed value and a tree
       | Just x' <- cast x :: Maybe (HsType Name) = withPretty b x'
@@ -94,19 +94,19 @@ valueFromData = go False
       -- Otherwise just construct a generic value
       | otherwise = generic False x
 
-    generic :: Data a => Bool -> a -> Ghc Value
+    generic :: (Data a, GhcMonad m) => Bool -> a -> m Value
     generic b x = ghandle handleException $ do
         constrName <- liftIO $ evaluate $ showConstr $ toConstr x
         Con constrName <$> sequence (gmapQ (go b) x)
 
-    withPretty :: (Data a, Outputable a) => Bool -> a -> Ghc Value
+    withPretty :: (Data a, Outputable a,GhcMonad m) => Bool -> a -> m Value
     withPretty True  x = generic True x
     withPretty False x = do
         prettied <- pretty x
         tree     <- generic True x
         return $! Rec "" [(prettied, tree)]
 
-    handleException :: SomeException -> Ghc Value
+    handleException :: GhcMonad m => SomeException -> m Value
     handleException e =
       case isKnownPanic (show e) of
         Just panic -> return $! String $ "<<" ++ panic ++ ">>"
@@ -166,7 +166,7 @@ cleanupValue _             = error "cleanupValue: unexpected Value"
   * Id       alias for Var
 -------------------------------------------------------------------------------}
 
-prettyOccName :: OccName -> Ghc Value
+prettyOccName :: GhcMonad m => OccName -> m Value
 prettyOccName nm
   | occNameSpace nm == Occ.varName   = mk "VarName"
   | occNameSpace nm == Occ.dataName  = mk "DataName"
@@ -174,22 +174,22 @@ prettyOccName nm
   | occNameSpace nm == Occ.tcClsName = mk "TcClsName"
   | otherwise                        = error "unexpected OccName"
   where
-    mk :: String -> Ghc Value
+    mk :: GhcMonad m => String -> m Value
     mk namespace = return $! Rec "" [(namespace, String (occNameString nm))]
 
-prettyTcEvBinds :: TcEvBinds -> Ghc Value
+prettyTcEvBinds :: GhcMonad m => TcEvBinds -> m Value
 prettyTcEvBinds (TcEvBinds mut) = pretty' mut
 prettyTcEvBinds (EvBinds bagOfEvBind) = do
     let evBinds = bagToList bagOfEvBind
     fmap (Con "TcEvBinds") $! mapM prettyEvBind evBinds
 
-prettyEvBind :: EvBind -> Ghc Value
+prettyEvBind :: GhcMonad m => EvBind -> m Value
 prettyEvBind (EvBind var term) = do
     pVar <- prettyVar var
     pTerm <- pretty' term
     return $! Rec "" [("ev_var", pVar), ("ev_term", pTerm)]
 
-prettyRdrName :: RdrName -> Ghc Value
+prettyRdrName :: GhcMonad m => RdrName -> m Value
 prettyRdrName (Unqual   nm) = prettyOccName nm
 prettyRdrName (Exact    nm) = prettyName nm
 prettyRdrName (Qual mod nm) = do
@@ -201,14 +201,14 @@ prettyRdrName (Orig mod nm) = do
     orig <- prettyModule mod
     return $! Rec "" (("Orig", orig):fields)
 
-prettyName :: Name -> Ghc Value
+prettyName :: GhcMonad m => Name -> m Value
 prettyName nm = do
     Rec "" fields <- prettyOccName (nameOccName nm)
     loc  <- pretty' (nameSrcSpan nm)
     sort <- prettyNameSort
     return $! Rec "" (("n_loc",loc):("n_sort",sort):fields)
   where
-    prettyNameSort :: Ghc Value
+    prettyNameSort :: GhcMonad m => m Value
     prettyNameSort
       | Just _tyThing <- wiredInNameTyThing_maybe nm = do
           mod <- prettyModule (nameModule nm)
@@ -224,33 +224,33 @@ prettyName nm = do
       | otherwise =
           error "Unexpected NameSort"
 
-prettyVar :: Var -> Ghc Value
+prettyVar :: GhcMonad m => Var -> m Value
 prettyVar nm = do
     Rec "" fields <- prettyName $ Var.varName nm
     typ <- valueFromData $ varType nm
     -- TODO: There is more information we could extract about Vars
     return $! Rec "" (("varType", typ):fields)
 
-prettyModuleName :: ModuleName -> Ghc Value
+prettyModuleName :: GhcMonad m => ModuleName -> m Value
 prettyModuleName = return . String . moduleNameString
 
 #if MIN_VERSION_ghc(7,10,0)
-prettyModule :: Module -> Ghc Value
+prettyModule :: GhcMonad m => Module -> m Value
 prettyModule mod = do
     pkg <- prettyPackageKey $ modulePackageKey mod
     nm  <- prettyModuleName $ moduleName       mod
     return $! Con "Module" [pkg, nm]
 
-prettyPackageKey :: PackageKey -> Ghc Value
+prettyPackageKey :: GhcMonad m => PackageKey -> m Value
 prettyPackageKey = return . String . packageKeyString
 #else
-prettyModule :: Module -> Ghc Value
+prettyModule :: GhcMonad m => Module -> m Value
 prettyModule mod = do
     pkg <- prettyPackageId  $ modulePackageId mod
     nm  <- prettyModuleName $ moduleName      mod
     return $! Con "Module" [pkg, nm]
 
-prettyPackageId :: PackageId -> Ghc Value
+prettyPackageId :: GhcMonad m => PackageId -> m Value
 prettyPackageId = return . String . packageIdString
 #endif
 
@@ -266,7 +266,7 @@ data Trees = Trees {
   , treeExports     :: Value
   }
 
-treesForModSummary :: ModSummary -> Ghc Trees
+treesForModSummary :: GhcMonad m => ModSummary -> m Trees
 treesForModSummary modSummary = do
    parsed      <- parseModule modSummary
    let wrapErr se = return $ Left $ show $ bagToList $ srcErrorMessages se
@@ -278,7 +278,7 @@ treesForModSummary modSummary = do
          <*> mkTypeCheckedTree eTypechecked
          <*> mkExportTree eTypechecked
   where
-    mkTree :: Data a => a -> Ghc Value
+    mkTree :: (Data a,GhcMonad m) => a -> m Value
     mkTree = liftM cleanupValue . valueFromData
 
     mkRenamedTree (Right typechecked) =
@@ -298,7 +298,7 @@ treesForModSummary modSummary = do
     treeNotAvailable :: String
     treeNotAvailable = "<<NOT AVAILABLE>>"
 
-treesForTargets :: [FilePath] -> Ghc [Trees]
+treesForTargets :: GhcMonad m => [FilePath] -> m [Trees]
 treesForTargets targets = do
   gbracket
     getSessionDynFlags
