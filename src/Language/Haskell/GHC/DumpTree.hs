@@ -5,7 +5,7 @@ module Language.Haskell.GHC.DumpTree
   , dumpJson
   , treesToDoc
   , dumpText
-  , Trees()
+  , Trees(..)
   ) where
 
 import Prelude hiding (mod)
@@ -264,7 +264,7 @@ data Trees = Trees {
   , treeRenamed     :: Value
   , treeTypechecked :: Value
   , treeExports     :: Value
-  }
+  } deriving (Eq,Show)
 
 treesForModSummary :: GhcMonad m => ModSummary -> m Trees
 treesForModSummary modSummary = do
