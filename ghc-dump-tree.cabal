@@ -45,6 +45,7 @@ executable ghc-dump-tree
                        vector               >=0.10 && <0.12,
                        ghc-dump-tree
   hs-source-dirs:      src
+  other-modules:       Language.Haskell.GHC.DumpTree
   default-language:    Haskell2010
   ghc-options:         -Wall -fno-warn-orphans
   other-extensions:    CPP
