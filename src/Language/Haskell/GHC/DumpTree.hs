@@ -2,6 +2,8 @@
 module Language.Haskell.GHC.DumpTree
   ( treesForTargetsIO
   , treesForTargets
+  , treesForSession
+  , treeDumpFlags
   , dumpJson
   , treesToDoc
   , dumpText
@@ -22,7 +24,6 @@ import Text.Show.Pretty (Value(..),valToDoc)
 import Text.PrettyPrint
 import qualified Data.Aeson           as Aeson
 import qualified Data.ByteString.Lazy as B.Lazy
-import qualified Data.Vector          as Vector
 import qualified Data.HashMap.Strict  as HashMap
 
 import Bag
@@ -259,7 +260,7 @@ prettyPackageId = return . String . packageIdString
 -------------------------------------------------------------------------------}
 
 data Trees = Trees {
-    treesModule     :: String
+    treeModule      :: String
   , treeParsed      :: Value
   , treeRenamed     :: Value
   , treeTypechecked :: Value
@@ -298,26 +299,35 @@ treesForModSummary modSummary = do
     treeNotAvailable :: String
     treeNotAvailable = "<<NOT AVAILABLE>>"
 
+-- | Get dyn flags: Don't compile anything
+treeDumpFlags :: DynFlags -> DynFlags
+treeDumpFlags dynFlags = dynFlags {
+        hscTarget = HscNothing
+      , ghcLink   = NoLink
+      }
+
+-- | Generate trees for modules in session
+treesForSession :: GhcMonad m => m [Trees]
+treesForSession = do
+  hscEnv <- getSession
+  mapM treesForModSummary $ hsc_mod_graph hscEnv
+
+-- | Generate trees for given files, when already in GHC
 treesForTargets :: GhcMonad m => [FilePath] -> m [Trees]
 treesForTargets targets = do
+  liftIO $ putStrLn "in treesForTargets"
   gbracket
     getSessionDynFlags
     setSessionDynFlags
     $ \dynFlags -> do
-      -- Don't compile anything
-      let dynFlags' = dynFlags {
-              hscTarget = HscNothing
-            , ghcLink   = NoLink
-            }
+      let dynFlags' = treeDumpFlags dynFlags
       void $ setSessionDynFlags dynFlags'
-
       -- Construct module graph
       setTargets (map mkTarget targets)
       void $ load LoadAllTargets
-
-      -- Print each module
-      hscEnv <- getSession
-      mapM treesForModSummary $ hsc_mod_graph hscEnv
+      --
+      -- generate each module
+      treesForSession
   where
     mkTarget :: FilePath -> Target
     mkTarget fp = Target {
@@ -326,17 +336,18 @@ treesForTargets targets = do
       , targetContents     = Nothing
       }
 
+-- | Generate trees for given files, starting a GHC session
+-- "ghc" needs to be in the PATH
 treesForTargetsIO :: [FilePath] -> IO [Trees]
 treesForTargetsIO targets = do
   libdir:_    <- lines <$> readProcess "ghc" ["--print-libdir"] ""
   runGhc (Just libdir) (treesForTargets targets)
 
 
-
 -- | Convert Trees to Doc
 treesToDoc :: Trees -> Doc
 treesToDoc Trees{..} = do
-  text ("# " ++ treesModule)
+  text ("# " ++ treeModule)
   $$
   text ""
   $$
@@ -386,19 +397,17 @@ instance ToJSON Value where
 
   -- Rest
   toJSON (Con nm [])   = Aeson.String (fromString nm)
-  toJSON (Con nm vals) = object [ fromString nm .= list vals ]
-  toJSON (Tuple  vals) = list vals
-  toJSON (List   vals) = list vals
+  toJSON (Con nm vals) = object [ fromString nm .= vals ]
+  toJSON (Tuple  vals) = toJSON vals
+  toJSON (List   vals) = toJSON vals
   toJSON (String s)    = Aeson.String (fromString s)
   toJSON (Rec "" flds) = object $ map (\(fld, val) -> fromString fld .= val) flds
   toJSON _             = error "toJSON: Unexpected Value"
 
-list :: ToJSON a => [a] -> Aeson.Value
-list = Aeson.Array . Vector.fromList . map toJSON
 
 instance ToJSON Trees where
   toJSON Trees{..} = object [
-      "module"      .= treesModule
+      "module"      .= treeModule
     , "parsed"      .= treeParsed
     , "renamed"     .= treeRenamed
     , "typechecked" .= treeTypechecked
