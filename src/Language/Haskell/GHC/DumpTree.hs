@@ -273,11 +273,12 @@ treesForModSummary modSummary = do
    let wrapErr se = return $ Left $ show $ bagToList $ srcErrorMessages se
    eTypechecked <- handleSourceError wrapErr (Right <$> typecheckModule parsed)
 
-   Trees <$> pretty (ms_mod_name modSummary)
-         <*> mkTree (pm_parsed_source parsed)
-         <*> mkRenamedTree    eTypechecked
-         <*> mkTypeCheckedTree eTypechecked
-         <*> mkExportTree eTypechecked
+   treeModule      <- pretty (ms_mod_name modSummary)
+   treeParsed      <- mkTree (pm_parsed_source parsed)
+   treeRenamed     <- mkRenamedTree     eTypechecked
+   treeTypechecked <- mkTypeCheckedTree eTypechecked
+   treeExports     <- mkExportTree      eTypechecked
+   return Trees{..}
   where
     mkTree :: (Data a,GhcMonad m) => a -> m Value
     mkTree = liftM cleanupValue . valueFromData
