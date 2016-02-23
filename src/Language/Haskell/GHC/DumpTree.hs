@@ -216,7 +216,8 @@ prettyName nm = do
     Rec "" fields <- prettyOccName (nameOccName nm)
     loc  <- pretty' (nameSrcSpan nm)
     sort <- prettyNameSort
-    return $! Rec "" (("n_loc",loc):("n_sort",sort):fields)
+    uniq <- pretty' $ nameUnique nm
+    return $! Rec "" (("n_loc",loc):("n_sort",sort):("n_uniq",uniq):fields)
   where
     prettyNameSort :: GhcMonad m => m Value
     prettyNameSort
