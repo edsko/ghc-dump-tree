@@ -1,5 +1,5 @@
 name:                ghc-dump-tree
-version:             0.2.0.0
+version:             0.2.0.1
 synopsis:            Dump GHC's parsed, renamed, and type checked ASTs
 description:         Useful for GHC devs or people who want to do something with
                      GHC's AST but don't want to hook into the GHC API itself.
@@ -13,7 +13,7 @@ bug-reports:         https://github.com/edsko/ghc-dump-tree/issues
 category:            Development
 build-type:          Simple
 cabal-version:       >=1.10
-tested-with:         GHC==7.4.2, GHC==7.8.3, GHC==7.10.3
+tested-with:         GHC==7.4.2, GHC==7.6.3, GHC==7.8.3, GHC==7.10.3, GHC==8.0.0.20160421
 
 extra-source-files:
   ChangeLog.md
