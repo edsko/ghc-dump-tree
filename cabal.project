@@ -1,0 +1,9 @@
+packages: ghc-dump-tree.cabal
+
+-- Workaround ghc 7.4.2 bug <https://ghc.haskell.org/trac/ghc/ticket/12655>
+
+package bytestring-builder
+  ghc-options: -XBangPatterns
+
+package primitive
+  ghc-options: -XMagicHash
