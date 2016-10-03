@@ -102,7 +102,7 @@ valueFromData = go False
 
     withPretty :: (Data a, Outputable a,GhcMonad m) => Bool -> a -> m Value
     withPretty True  x = generic True x
-    withPretty False x = do
+    withPretty False x = ghandle handleException $ do
         prettied <- pretty x
         tree     <- generic True x
         return $! Rec "" [(prettied, tree)]
