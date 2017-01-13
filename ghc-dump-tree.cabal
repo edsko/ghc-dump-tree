@@ -48,7 +48,7 @@ executable ghc-dump-tree
                        aeson                >=0.7  && <0.12,
                        bytestring           >=0.9  && <0.11,
                        ghc                  >=7.4  && <8.2,
-                       optparse-applicative >=0.11 && <0.13,
+                       optparse-applicative >=0.11 && <0.14,
                        pretty               >=1.1  && <1.2,
                        pretty-show          >=1.6  && <1.7,
                        process              >=1.1  && <1.5,
