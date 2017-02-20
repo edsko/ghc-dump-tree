@@ -33,7 +33,7 @@ library
                        pretty-show          >=1.6  && <1.7,
                        process              >=1.1  && <1.5,
                        unordered-containers >=0.2  && <0.3,
-                       vector               >=0.10 && <0.12
+                       vector               >=0.10 && <0.13
   hs-source-dirs:      src
   default-language:    Haskell2010
   ghc-options:         -Wall -fno-warn-orphans
@@ -53,7 +53,7 @@ executable ghc-dump-tree
                        pretty-show          >=1.6  && <1.7,
                        process              >=1.1  && <1.5,
                        unordered-containers >=0.2  && <0.3,
-                       vector               >=0.10 && <0.12,
+                       vector               >=0.10 && <0.13,
                        ghc-dump-tree
   hs-source-dirs:      src
   other-modules:       Language.Haskell.GHC.DumpTree
