@@ -31,7 +31,7 @@ library
                        ghc                  >=7.4  && <8.3,
                        pretty               >=1.1  && <1.2,
                        pretty-show          >=1.6  && <1.7,
-                       process              >=1.1  && <1.5,
+                       process              >=1.1  && <1.7,
                        unordered-containers >=0.2  && <0.3,
                        vector               >=0.10 && <0.13
   hs-source-dirs:      src
@@ -51,7 +51,7 @@ executable ghc-dump-tree
                        optparse-applicative >=0.11 && <0.14,
                        pretty               >=1.1  && <1.2,
                        pretty-show          >=1.6  && <1.7,
-                       process              >=1.1  && <1.5,
+                       process              >=1.1  && <1.7,
                        unordered-containers >=0.2  && <0.3,
                        vector               >=0.10 && <0.13,
                        ghc-dump-tree
