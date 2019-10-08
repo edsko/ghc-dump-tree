@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE NoMonadFailDesugaring #-}
 module Language.Haskell.GHC.DumpTree
   ( treesForTargetsIO
   , treesForTargets
@@ -77,8 +78,9 @@ valueFromData = go False
     go :: (Data a, GhcMonad m) => Bool -> a -> m Value
     go b x
       -- Types where we want to show both a pretty-printed value and a tree
-      | Just x' <- cast x :: Maybe (HsType Name) = withPretty b x'
-      | Just x' <- cast x :: Maybe (HsType Var)  = withPretty b x'
+      | Just x' <- cast x :: Maybe (HsType GhcPs) = withPretty b x'
+      | Just x' <- cast x :: Maybe (HsType GhcRn) = withPretty b x'
+      | Just x' <- cast x :: Maybe (HsType GhcTc) = withPretty b x'
       | Just x' <- cast x :: Maybe Type          = withPretty b x'
       -- Abstract types we cannot traverse
       | Just x' <- cast x :: Maybe SrcSpan    = pretty' x'
@@ -102,7 +104,7 @@ valueFromData = go False
 
     withPretty :: (Data a, Outputable a, GhcMonad m) => Bool -> a -> m Value
     withPretty True  x = generic True x
-    withPretty False x = ghandle handleException $ do
+    withPretty False x = ghandle (handleException String) $ do
         prettied <- pretty x
         tree     <- generic True x
         return $! Rec "" [(prettied, tree)]
@@ -334,7 +336,7 @@ treeDumpFlags dynFlags = dynFlags {
 treesForSession :: GhcMonad m => m [Trees]
 treesForSession = do
   hscEnv <- getSession
-  mapM treesForModSummary $ hsc_mod_graph hscEnv
+  mapM treesForModSummary . mgModSummaries $ hsc_mod_graph hscEnv
 
 -- | Generate trees for given files, when already in GHC
 treesForTargets :: GhcMonad m => [FilePath] -> m [Trees]
