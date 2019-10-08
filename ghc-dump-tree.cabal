@@ -1,5 +1,5 @@
 name:                ghc-dump-tree
-version:             0.2.0.1
+version:             0.2.1.0
 synopsis:            Dump GHC's parsed, renamed, and type checked ASTs
 description:         Useful for GHC devs or people who want to do something with
                      GHC's AST but don't want to hook into the GHC API itself.

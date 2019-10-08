@@ -1,4 +1,3 @@
-{-# LANGUAGE CPP #-}
 {-# LANGUAGE NoMonadFailDesugaring #-}
 module Language.Haskell.GHC.DumpTree
   ( treesForTargetsIO
@@ -47,12 +46,8 @@ import qualified OccName as Occ
 
 pretty :: (Outputable a, GhcMonad m) => a -> m String
 pretty x = ghandle (handleException id) $ do
-#if MIN_VERSION_ghc(7,6,3)
   dynFlags <- getSessionDynFlags
   return $! showSDoc dynFlags (ppr x)
-#else
-  return $! showSDoc (ppr x)
-#endif
 
 pretty' :: (Outputable a, GhcMonad m) => a -> m Value
 pretty' = liftM String . pretty
@@ -189,20 +184,12 @@ prettyTcEvBinds (EvBinds bagOfEvBind) = do
     let evBinds = bagToList bagOfEvBind
     fmap (Con "TcEvBinds") $! mapM prettyEvBind evBinds
 
-#if MIN_VERSION_ghc(8,0,0)
 prettyEvBind :: GhcMonad m => EvBind -> m Value
 prettyEvBind (EvBind var term isGiven) = do
     pVar <- prettyVar var
     pTerm <- pretty' term
     pGiven <- pretty' isGiven
     return $! Rec "" [("ev_var", pVar), ("ev_term", pTerm), ("ev_is_given", pGiven)]
-#else
-prettyEvBind :: GhcMonad m => EvBind -> m Value
-prettyEvBind (EvBind var term) = do
-    pVar <- prettyVar var
-    pTerm <- pretty' term
-    return $! Rec "" [("ev_var", pVar), ("ev_term", pTerm)]
-#endif
 
 prettyRdrName :: GhcMonad m => RdrName -> m Value
 prettyRdrName (Unqual   nm) = prettyOccName nm
@@ -250,7 +237,6 @@ prettyVar nm = do
 prettyModuleName :: GhcMonad m => ModuleName -> m Value
 prettyModuleName = return . String . moduleNameString
 
-#if MIN_VERSION_ghc(8,0,0)
 prettyModule :: GhcMonad m => Module -> m Value
 prettyModule mod = do
     pkg <- prettyUnitId     $ moduleUnitId mod
@@ -259,26 +245,6 @@ prettyModule mod = do
 
 prettyUnitId :: GhcMonad m => UnitId -> m Value
 prettyUnitId = return . String . unitIdString
-
-#elif MIN_VERSION_ghc(7,10,0)
-prettyModule :: GhcMonad m => Module -> m Value
-prettyModule mod = do
-    pkg <- prettyPackageKey $ modulePackageKey mod
-    nm  <- prettyModuleName $ moduleName       mod
-    return $! Con "Module" [pkg, nm]
-
-prettyPackageKey :: GhcMonad m => PackageKey -> m Value
-prettyPackageKey = return . String . packageKeyString
-#else
-prettyModule :: GhcMonad m => Module -> m Value
-prettyModule mod = do
-    pkg <- prettyPackageId  $ modulePackageId mod
-    nm  <- prettyModuleName $ moduleName      mod
-    return $! Con "Module" [pkg, nm]
-
-prettyPackageId :: GhcMonad m => PackageId -> m Value
-prettyPackageId = return . String . packageIdString
-#endif
 
 {-------------------------------------------------------------------------------
   Extracting ASTs from a set of targets
@@ -447,9 +413,3 @@ dumpJson = B.Lazy.putStr . Aeson.encode
   Orphans
 -------------------------------------------------------------------------------}
 
-#if MIN_VERSION_ghc(7,8,0)
-#else
-instance Applicative Ghc where
-  pure  = return
-  (<*>) = ap
-#endif
